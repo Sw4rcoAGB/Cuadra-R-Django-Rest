@@ -14,7 +14,7 @@ from api.models import (
     CatalogoEstadoSesion, CatalogoEstadoPago, CatalogoParentesco,
     Terapeuta, Caballo, BitacoraEquina, Paciente, PacienteDiagnostico,
     ContactoEmergencia, Sesion, ReporteSesion, ReporteObjetivo, Pago,
-    BitacoraSeguridad
+    BitacoraSeguridad, PasswordResetToken
 )
 from api.serializers import (
     RolSerializer, UsuarioSerializer, CatalogoEspecialidadSerializer,
@@ -281,9 +281,14 @@ class BitacoraEquinaViewSet(viewsets.ModelViewSet):
 class PacienteViewSet(viewsets.ModelViewSet):
     queryset = Paciente.objects.all()
     serializer_class = PacienteSerializer
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    permission_classes = [IsAuthenticated]
     pagination_class = None
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.user.rol.nombre in ['Tutor', 'Paciente']:
+            return qs.filter(tutor=self.request.user)
+        return qs
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -337,9 +342,14 @@ class SesionViewSet(viewsets.ModelViewSet):
         
         if not self.request.user.is_staff:
             if rol_nombre == 'Terapeuta':
-                return qs.filter(terapeuta__usuario=self.request.user)
+                qs = qs.filter(terapeuta__usuario=self.request.user)
             elif rol_nombre in ['Tutor', 'Paciente']:
-                return qs.filter(paciente__tutor=self.request.user)
+                qs = qs.filter(paciente__tutor=self.request.user)
+
+        fecha = self.request.query_params.get('fecha')
+        if fecha:
+            qs = qs.filter(fecha_hora__date=fecha)
+
         return qs
 
     def get_serializer_class(self):
@@ -613,9 +623,98 @@ def registrar_terapeuta(request, pk=None):
 
 @extend_schema(tags=['Usuarios'])
 @api_view(['POST'])
+@permission_classes([AllowAny])
+def forgot_password(request):
+    """Generates a magic link token and outputs it to the console (Option B simulated, ready for SMTP)."""
+    email = request.data.get('email', '').strip()
+    if not email:
+        return Response({"error": "El correo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        usuario = Usuario.objects.get(email__iexact=email)
+        
+        # Invalida tokens anteriores para que solo el último funcione
+        PasswordResetToken.objects.filter(usuario=usuario, utilizado=False).update(utilizado=True)
+        
+        # Create token
+        token = PasswordResetToken.objects.create(usuario=usuario)
+        
+        reset_link = f"http://localhost:3000/reset-password?token={token.id}"
+        
+        # Enviar correo real de forma asíncrona para que no tarde 1 minuto!
+        import threading
+        
+        def enviar_correo_magico():
+            from django.core.mail import send_mail
+            from django.conf import settings
+            
+            html_message = f"""
+            <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #821026;">Recuperación de Acceso</h2>
+                <p>Hola <strong>{usuario.nombre_completo}</strong>,</p>
+                <p>Hemos recibido una solicitud para acceder a tu cuenta en el Portal de Cuadra Erre.</p>
+                <p>Haz clic en el siguiente botón seguro para establecer tu nueva contraseña:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{reset_link}" style="background-color: #821026; color: white; padding: 15px 25px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                        Reestablecer Contraseña
+                    </a>
+                </div>
+                <p style="color: #666; font-size: 12px;">Este enlace expira en 1 hora. Si solicitas otro, este enlace quedará invalidado de inmediato.</p>
+            </div>
+            """
+            try:
+                send_mail(
+                    subject="🔑 Recupera tu acceso a Cuadra Erre",
+                    message=f"Entra a este enlace para recuperar tu contraseña: {reset_link}",
+                    from_email=settings.EMAIL_HOST_USER,
+                    recipient_list=[usuario.email],
+                    fail_silently=True,
+                    html_message=html_message
+                )
+            except Exception as e:
+                print("Error al enviar correo:", e)
+                
+        # Iniciar el hilo sin bloquear la respuesta web
+        threading.Thread(target=enviar_correo_magico).start()
+        
+        return Response({"message": "¡Enlace de seguridad enviado con éxito!"}, status=status.HTTP_200_OK)
+    except Usuario.DoesNotExist:
+        # El usuario pidió un error explícito
+        return Response({"error": "Este correo no está registrado en el sistema. Verifica que esté bien escrito."}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password_magic(request):
+    """Consumes the magic link token and sets a new password."""
+    token_id = request.data.get('token')
+    new_password = request.data.get('new_password')
+    
+    if not token_id or not new_password:
+        return Response({"error": "Token y nueva contraseña son requeridos."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    try:
+        token_obj = PasswordResetToken.objects.get(id=token_id)
+        if not token_obj.is_valid():
+            return Response({"error": "El enlace ha expirado o ya fue utilizado."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        usuario = token_obj.usuario
+        usuario.password = make_password(new_password)
+        usuario.save()
+        
+        token_obj.utilizado = True
+        token_obj.save()
+        
+        return Response({"message": "Contraseña actualizada exitosamente."}, status=status.HTTP_200_OK)
+    except PasswordResetToken.DoesNotExist:
+        return Response({"error": "Token inválido."}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def resetear_password(request, usuario_id):
     try:
-        nueva_password = request.data.get('password')
+        nueva_password = request.data.get('new_password') or request.data.get('password')
         if not nueva_password:
             return Response({"error": "Debe proporcionar una nueva contraseña."}, status=status.HTTP_400_BAD_REQUEST)
 

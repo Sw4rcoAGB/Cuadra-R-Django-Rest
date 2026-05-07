@@ -77,6 +77,25 @@ class CuadraTokenObtainPairSerializer(serializers.Serializer):
         refresh = RefreshToken()
         refresh[api_settings.USER_ID_CLAIM] = str(user.id)
 
+        # ── Validación extra para Pacientes/Tutores ───────────────────────────
+        display_name = user.nombre_completo
+        if user.rol.nombre in ['Tutor', 'Paciente']:
+            pacientes_activos = user.pacientes_tutorados.filter(activo=True)
+            if not pacientes_activos.exists():
+                raise serializers.ValidationError(
+                    {'detail': 'Este expediente ha sido dado de baja. Ya no tienes acceso al portal.'},
+                    code='authentication'
+                )
+            
+            if pacientes_activos.count() == 1:
+                pac = pacientes_activos.first()
+                if pac.es_mayor_de_edad:
+                    display_name = pac.nombre
+                else:
+                    display_name = f"{pac.nombre}|{user.nombre_completo}"
+            else:
+                display_name = f"Familia {user.nombre_completo}"
+
         # ── 5. Inyectar claims personalizados ─────────────────────────────────
         rol_nombre = user.rol.nombre
         redirect_to = ROL_REDIRECT_MAP.get(rol_nombre, '/dashboard')
@@ -84,7 +103,7 @@ class CuadraTokenObtainPairSerializer(serializers.Serializer):
         for token in (refresh, refresh.access_token):
             token['user_id']     = str(user.id)
             token['email']       = user.email
-            token['nombre']      = user.nombre_completo
+            token['nombre']      = display_name
             token['rol']         = rol_nombre
             token['redirect_to'] = redirect_to
 
@@ -93,7 +112,7 @@ class CuadraTokenObtainPairSerializer(serializers.Serializer):
             'refresh': str(refresh),
             'user': {
                 'id':          str(user.id),
-                'nombre':      user.nombre_completo,
+                'nombre':      display_name,
                 'email':       user.email,
                 'rol':         rol_nombre,
                 'redirect_to': redirect_to,

@@ -25,4 +25,9 @@ class CuadraJWTAuthentication(JWTAuthentication):
         if not user.activo:
             raise AuthenticationFailed(_("User is inactive"), code="user_inactive")
 
+        # Invalidar la sesión si es un tutor que ya no tiene pacientes activos
+        if user.rol.nombre in ['Tutor', 'Paciente']:
+            if not user.pacientes_tutorados.filter(activo=True).exists():
+                raise AuthenticationFailed(_("Este expediente ha sido dado de baja."), code="user_inactive")
+
         return user

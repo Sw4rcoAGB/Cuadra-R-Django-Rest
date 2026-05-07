@@ -19,8 +19,29 @@ class Usuario(models.Model):
     telefono = models.CharField(max_length=20, blank=True, null=True)
     activo = models.BooleanField(default=True)
 
+    # DRF Compatibility Properties
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
     def __str__(self):
         return self.nombre_completo
+
+class PasswordResetToken(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    utilizado = models.BooleanField(default=False)
+
+    def is_valid(self):
+        from django.utils import timezone
+        import datetime
+        # Válido por 1 hora
+        return not self.utilizado and (timezone.now() - self.creado_en) < datetime.timedelta(hours=1)
 
 # ==========================================
 # MÓDULO 2: CATÁLOGOS MAESTROS
