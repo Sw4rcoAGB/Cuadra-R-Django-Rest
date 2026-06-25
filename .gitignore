@@ -7,5 +7,22 @@ venv/
 db.sqlite3
 media/
 static_root/
+
+# IDE
 .vscode/
+.idea/
+
+# Logs
 *.log
+
+# Database backups (NUNCA subir backups con datos reales)
+*.sql
+*.backup
+*.dump
+
+# Scratch / temporal
+scratch/
+
+# OS
+.DS_Store
+Thumbs.db

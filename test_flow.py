@@ -10,9 +10,9 @@ def test_full_flow():
     print("1. Probando Login de Administrador...")
     try:
         login_data = {"email": "admin@cuadraerre.com", "password": "12345678"}
-        response = httpx.post(f"{BASE_URL}/login/", json=login_data)
+        response = httpx.post(f"{BASE_URL}/login", json=login_data)
         if response.status_code == 200:
-            token = response.json().get('token')
+            token = response.json().get('access')
             print(f"   [OK] Login exitoso. Token generado.")
         else:
             print(f"   [ERROR] Login fallido: {response.text}")
@@ -21,14 +21,16 @@ def test_full_flow():
         print(f"   [ERROR] Error de conexión: {e}")
         return
 
+    headers = {"Authorization": f"Bearer {token}"}
+
     # 2. Probar Catálogos (Leer de Postgres)
     print("\n2. Consultando Catálogo de Especialidades...")
-    response = httpx.get(f"{BASE_URL}/especialidades/")
+    response = httpx.get(f"{BASE_URL}/especialidades", headers=headers)
     if response.status_code == 200:
         count = len(response.json())
         print(f"   [OK] Se obtuvieron {count} especialidades desde PostgreSQL.")
     else:
-        print(f"   [ERROR] Fallo al leer catálogos.")
+        print(f"   [ERROR] Fallo al leer catálogos: {response.text}")
 
     # 3. Registrar un Nuevo Paciente
     print("\n3. Registrando un Nuevo Paciente de Prueba...")
@@ -44,7 +46,7 @@ def test_full_flow():
         "direccion": "Calle de Prueba 123",
         "motivo_consulta": "Prueba de integración del sistema."
     }
-    response = httpx.post(f"{BASE_URL}/pacientes/registrar/", json=paciente_data)
+    response = httpx.post(f"{BASE_URL}/pacientes/registrar", json=paciente_data, headers=headers)
     if response.status_code == 201:
         paciente_id = response.json().get('id')
         print(f"   [OK] Paciente registrado con ID: {paciente_id}")
