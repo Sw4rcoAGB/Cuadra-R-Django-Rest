@@ -1,2 +1,3 @@
-# Requirements root redirection
--r requirements/dev.txt
+pytest==8.4.2
+pytest-django==4.12.0
+httpx==0.27.0
